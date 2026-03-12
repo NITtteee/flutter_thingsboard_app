@@ -19,6 +19,8 @@ import 'package:thingsboard_app/core/logger/tb_logger.dart';
 import 'package:thingsboard_app/generated/l10n.dart';
 import 'package:thingsboard_app/locator.dart';
 import 'package:thingsboard_app/thingsboard_client.dart';
+import 'package:thingsboard_app/utils/services/endpoint/i_endpoint_service.dart';
+import 'package:thingsboard_app/utils/services/tb_client_service/i_tb_client_service.dart';
 import 'package:thingsboard_app/utils/ui/visibility_widget.dart';
 
 class LoginWidget extends HookConsumerWidget {
@@ -28,6 +30,8 @@ class LoginWidget extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final loading = useState(true);
     final providers = ref.watch(oauthProvider);
+    final endpointFuture = useMemoized(() => getIt<IEndpointService>().getEndpoint());
+    final endpointSnapshot = useFuture(endpointFuture);
     final form = useMemoized(
       () => FormGroup({
         "email": FormControl(
@@ -88,6 +92,22 @@ class LoginWidget extends HookConsumerWidget {
                                       ref,
                                     ),
                                 clients: providers.value?.oAuth2Clients ?? [],
+                              ),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed:
+                                      loading.value
+                                          ? null
+                                          : () => onServerAddressPressed(
+                                            context,
+                                            ref,
+                                            loading,
+                                            endpointSnapshot.data,
+                                          ),
+                                  icon: const Icon(Icons.dns_outlined),
+                                  label: Text(S.of(context).address),
+                                ),
                               ),
                               TextDivider(text: S.of(context).or),
 
@@ -195,8 +215,8 @@ Future<void> onLoginPressed(
   final String password = form.control('password').value.toString();
   try {
     loading.value = true;
-  final res =   await ref.read(loginProvider.notifier).login(username, password);
-    
+    final res = await ref.read(loginProvider.notifier).login(username, password);
+
     loading.value = res;
   } catch (e) {
     form.setErrors({"err": {}});
@@ -230,10 +250,98 @@ Future<void> onOauth2ButtonPressed(
     return;
   }
   loading.value = true;
-final res =  await  ref.read(loginProvider.notifier).oauthLogin(client.url);
+  final res = await ref.read(loginProvider.notifier).oauthLogin(client.url);
   loading.value = res;
 }
 
 Future<void> onForgotPassword(BuildContext context) async {
   context.push('/login/resetPasswordRequest');
+}
+
+Future<void> onServerAddressPressed(
+  BuildContext context,
+  WidgetRef ref,
+  ValueNotifier<bool> loading,
+  String? initialEndpoint,
+) async {
+  final controller = TextEditingController(text: initialEndpoint ?? '');
+  final endpoint = await showDialog<String>(
+    context: context,
+    builder: (context) {
+      final localizations = MaterialLocalizations.of(context);
+
+      return AlertDialog(
+        title: Text(S.of(context).address),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'http://example.com'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(localizations.cancelButtonLabel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: Text(localizations.okButtonLabel),
+          ),
+        ],
+      );
+    },
+  );
+  controller.dispose();
+
+  if (endpoint == null) {
+    return;
+  }
+
+  final normalizedEndpoint = _normalizeEndpoint(endpoint);
+  if (normalizedEndpoint == null) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid server address format')),
+      );
+    }
+    return;
+  }
+
+  loading.value = true;
+  try {
+    await getIt<IEndpointService>().setEndpoint(normalizedEndpoint);
+    await getIt<ITbClientService>().reInit(
+      endpoint: normalizedEndpoint,
+      onDone: () {
+        ref.invalidate(oauthProvider);
+      },
+      onAuthError: (_) {},
+    );
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  } finally {
+    loading.value = false;
+  }
+}
+
+String? _normalizeEndpoint(String input) {
+  final trimmedInput = input.trim();
+  if (trimmedInput.isEmpty) {
+    return null;
+  }
+
+  final withScheme =
+      trimmedInput.startsWith('http://') || trimmedInput.startsWith('https://')
+          ? trimmedInput
+          : 'http://$trimmedInput';
+  final uri = Uri.tryParse(withScheme);
+
+  if (uri == null || uri.host.isEmpty) {
+    return null;
+  }
+
+  return uri.origin;
 }
