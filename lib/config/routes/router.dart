@@ -69,7 +69,7 @@ class ThingsboardAppRouter {
 
     final uri = Uri.tryParse(link.trim());
     if (uri == null || uri.path.isEmpty) {
-      log.warning('TbContext: ignore malformed appLink: $link');
+      log.warn('TbContext: ignore malformed appLink: $link');
       return;
     }
 
@@ -77,7 +77,7 @@ class ThingsboardAppRouter {
         uri.scheme.isNotEmpty &&
         uri.scheme != 'http' &&
         uri.scheme != 'https') {
-      log.warning('TbContext: ignore unsupported appLink scheme: ${uri.scheme}');
+      log.warn('TbContext: ignore unsupported appLink scheme: ${uri.scheme}');
       return;
     }
 
