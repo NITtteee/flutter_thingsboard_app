@@ -30,8 +30,6 @@ class LoginWidget extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final loading = useState(true);
     final providers = ref.watch(oauthProvider);
-    final endpointFuture = useMemoized(() => getIt<IEndpointService>().getEndpoint());
-    final endpointSnapshot = useFuture(endpointFuture);
     final form = useMemoized(
       () => FormGroup({
         "email": FormControl(
@@ -99,14 +97,20 @@ class LoginWidget extends HookConsumerWidget {
                                   onPressed:
                                       loading.value
                                           ? null
-                                          : () => onServerAddressPressed(
-                                            context,
-                                            ref,
-                                            loading,
-                                            endpointSnapshot.data,
-                                          ),
+                                          : () async {
+                                            final endpoint = await getIt<IEndpointService>().getEndpoint();
+                                            if (!context.mounted) {
+                                              return;
+                                            }
+                                            await onServerAddressPressed(
+                                              context,
+                                              ref,
+                                              loading,
+                                              endpoint,
+                                            );
+                                          },
                                   icon: const Icon(Icons.dns_outlined),
-                                  label: const Text('输入服务器地址'),
+                                  label: Text(_serverAddressLabel(context)),
                                 ),
                               ),
                               TextDivider(text: S.of(context).or),
@@ -271,7 +275,7 @@ Future<void> onServerAddressPressed(
       final localizations = MaterialLocalizations.of(context);
 
       return AlertDialog(
-        title: const Text('输入服务器地址'),
+        title: Text(_serverAddressLabel(context)),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -300,7 +304,7 @@ Future<void> onServerAddressPressed(
   if (normalizedEndpoint == null) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid server address format')),
+        SnackBar(content: Text(_invalidServerAddressMessage(context))),
       );
     }
     return;
@@ -344,4 +348,21 @@ String? _normalizeEndpoint(String input) {
   }
 
   return uri.origin;
+}
+
+
+String _serverAddressLabel(BuildContext context) {
+  final languageCode = Localizations.localeOf(context).languageCode;
+  if (languageCode == 'zh') {
+    return '输入服务器地址';
+  }
+  return 'Server address';
+}
+
+String _invalidServerAddressMessage(BuildContext context) {
+  final languageCode = Localizations.localeOf(context).languageCode;
+  if (languageCode == 'zh') {
+    return '服务器地址格式无效，请输入如 http://example.com:8080';
+  }
+  return 'Invalid server address. Example: http://example.com:8080';
 }
